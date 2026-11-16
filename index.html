@@ -98,8 +98,8 @@
     border: 3px solid var(--ink);
     border-radius: 8cqw;
   }
-  .layer.l1 { background: var(--sky); transform: translate(3cqw, 4cqw) rotate(-7deg); }
-  .layer.l2 { background: var(--sun); transform: translate(3cqw, 4cqw) rotate(5deg); }
+  .layer.l1 { background: var(--l1, var(--sky)); transform: translate(3cqw, 4cqw) rotate(-7deg); }
+  .layer.l2 { background: var(--l2, var(--sun)); transform: translate(3cqw, 4cqw) rotate(5deg); }
 
   .card-inner {
     position: absolute;
@@ -118,7 +118,7 @@
     -webkit-backface-visibility: hidden;
   }
   .front {
-    background: var(--teal);
+    background: var(--c, var(--teal));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -147,7 +147,7 @@
   }
   .back {
     transform: rotateY(180deg);
-    background: var(--sky-card);
+    background: var(--c, var(--sky-card));
     display: grid;
     grid-template-rows: 1fr auto 1fr;
     justify-items: center;
@@ -171,7 +171,7 @@
     font-weight: 700;
     line-height: 1;
     letter-spacing: -.04em;
-    text-shadow: 1.25cqw 1.25cqw 0 var(--sun);
+    text-shadow: 1.25cqw 1.25cqw 0 rgba(255, 255, 255, .85);
   }
   .title {
     align-self: end;
@@ -346,6 +346,19 @@
     return a;
   }
 
+  // ---------- Kartenfarben (wechseln pro Karte, Vorder- und Rückseite gleich) ----------
+  const PALETTE = [
+    "#7DE0D0", // Türkis
+    "#9CC9FF", // Himmelblau
+    "#FFB8CE", // Rosa
+    "#FFE066", // Gelb
+    "#FFAE85", // Korall
+    "#CDBBFF", // Flieder
+    "#C6F25A", // Limette
+    "#A8F0B5", // Mint
+  ];
+  const colorAt = (i) => PALETTE[i % PALETTE.length];
+
   // ---------- QR ----------
   function qrSvg(text) {
     const qr = qrcode(0, "M");
@@ -369,7 +382,8 @@
   function renderCard() {
     const s = deck[pos];
     $("stage").innerHTML = `
-      <div class="card" tabindex="0" role="button" aria-label="Karte umdrehen">
+      <div class="card" tabindex="0" role="button" aria-label="Karte umdrehen"
+           style="--c:${colorAt(pos)};--l1:${colorAt(pos + 1)};--l2:${colorAt(pos + 2)}">
         <div class="layer l1"></div>
         <div class="layer l2"></div>
         <div class="card-inner">
