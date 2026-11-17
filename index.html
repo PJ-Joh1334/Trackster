@@ -9,6 +9,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+  // Muss vor dem Spotify-Skript stehen: wird aufgerufen, sobald die Player-API geladen ist.
+  window.onSpotifyIframeApiReady = function (api) {
+    window.__spotifyApi = api;
+    if (window.__onSpotifyApi) window.__onSpotifyApi();
+  };
+</script>
+<script src="https://open.spotify.com/embed/iframe-api/v1" async
+        onerror="window.__spotifyFailed = true; if (window.__onSpotifyApi) window.__onSpotifyApi();"></script>
 <style>
   :root {
     --bg: #EAF7FC;
@@ -62,6 +71,61 @@
     font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
+
+  .hdr-right { display: flex; align-items: center; gap: 10px; }
+  .gear {
+    width: 40px; height: 40px; flex: none;
+    border-radius: 50%;
+    border: 2.5px solid var(--ink);
+    background: #fff;
+    color: var(--ink);
+    box-shadow: 3px 3px 0 var(--ink);
+    padding: 0;
+  }
+  .gear svg { width: 22px; height: 22px; }
+  .gear:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+  #toast {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 72px);
+    right: 24px;
+    z-index: 5;
+    background: var(--ink);
+    color: #fff;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .2s, transform .2s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: none; }
+  /* Unsichtbarer Spotify-Player (im sichtbaren Bereich, damit der Browser ihn nicht drosselt) */
+  #player-host {
+    position: fixed;
+    top: 0; left: 0;
+    width: 300px; height: 80px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
+    overflow: hidden;
+  }
+  .play-btn {
+    width: 46cqw; height: 46cqw;
+    border-radius: 50%;
+    border: 3px solid var(--ink);
+    background: #fff;
+    color: var(--ink);
+    box-shadow: 1.5cqw 1.5cqw 0 var(--ink);
+    padding: 0;
+  }
+  .play-btn svg { width: 46%; height: 46%; }
+  .play-btn .ico-pause { display: none; }
+  .card.is-playing .play-btn { background: var(--ink); color: #fff; }
+  .card.is-playing .play-btn .ico-play { display: none; }
+  .card.is-playing .play-btn .ico-pause { display: block; }
+  .play-btn:active { transform: translate(2px, 2px); }
 
   #stage {
     flex: 1;
@@ -250,8 +314,16 @@
 <body>
   <header>
     <div class="logo">Trackstar</div>
-    <span id="counter"></span>
+    <div class="hdr-right">
+      <span id="counter"></span>
+      <button id="gear" class="gear" type="button" aria-label="Kartenmodus wechseln" title="Zwischen QR-Code und Play-Button wechseln">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
   </header>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="player-host" aria-hidden="true"><div id="embed"></div></div>
 
   <div id="stage"></div>
 
@@ -287,6 +359,14 @@
   let pos = 0;
   let cardEl = null;
   let busy = false;
+
+  // Kartenmodus: "play" = Play-Button, "qr" = QR-Code (Zahnrad oben rechts schaltet um)
+  const MODE_KEY = "trackstar-mode";
+  let mode = "play";
+  try {
+    const saved = localStorage.getItem(MODE_KEY);
+    if (saved === "play" || saved === "qr") mode = saved;
+  } catch (e) {}
 
   const $ = (id) => document.getElementById(id);
 
@@ -380,6 +460,7 @@
   }
 
   function renderCard() {
+    stopPlayback();
     const s = deck[pos];
     $("stage").innerHTML = `
       <div class="card" tabindex="0" role="button" aria-label="Karte umdrehen"
@@ -387,10 +468,7 @@
         <div class="layer l1"></div>
         <div class="layer l2"></div>
         <div class="card-inner">
-          <div class="face front">
-            <div class="qr-box">${qrSvg(s.link)}</div>
-            <div class="badge">Scannen!</div>
-          </div>
+          <div class="face front">${frontHtml(s)}</div>
           <div class="face back">
             <div class="artist">${esc(s.artist)}</div>
             <div class="year">${esc(s.year)}</div>
@@ -400,14 +478,19 @@
       </div>
       <div id="hint">Tippen zum Umdrehen</div>`;
     cardEl = $("stage").querySelector(".card");
-    cardEl.addEventListener("click", flip);
+    cardEl.addEventListener("click", (e) => {
+      if (e.target.closest(".play-btn")) { togglePlay(); return; }
+      flip();
+    });
     cardEl.addEventListener("keydown", (e) => {
+      if (e.target !== cardEl) return; // Enter/Leertaste auf dem Play-Button löst dessen eigenen Klick aus
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); }
     });
     $("open").href = s.link;
     $("counter").textContent = `${pos + 1} / ${deck.length}`;
     $("prev").disabled = pos === 0;
     $("nextLabel").textContent = pos === deck.length - 1 ? "Neu mischen" : "Nächste Karte";
+    afterRender(s);
   }
 
   function flip() {
@@ -442,6 +525,130 @@
       busy = false;
     }, wasFlipped ? 350 : 0);
   }
+
+  // ---------- Player (Spotify-Einbett-Player, unsichtbar) ----------
+  let controller = null;   // Spotify-iFrame-Controller
+  let creating = false;
+  let loadedUri = null;    // Track, der im Player geladen ist
+  let currentUri = null;   // Track der aktuellen Karte
+  let playing = false;
+
+  function trackUri(link) {
+    const m = link.match(/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(?:embed\/)?track\/([A-Za-z0-9]+)/i)
+           || link.match(/^spotify:track:([A-Za-z0-9]+)/i);
+    return m ? "spotify:track:" + m[1] : null;
+  }
+
+  function usePlayer(s) { return mode === "play" && !!trackUri(s.link); }
+
+  function frontHtml(s) {
+    if (usePlayer(s)) {
+      return `
+        <button type="button" class="play-btn" aria-label="Song abspielen oder pausieren">
+          <svg class="ico-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
+        </button>
+        <div class="badge">Anhören!</div>`;
+    }
+    return `
+      <div class="qr-box">${qrSvg(s.link)}</div>
+      <div class="badge">Scannen!</div>`;
+  }
+
+  function setHint(text) {
+    const h = $("hint");
+    if (h) h.textContent = text;
+  }
+
+  function syncPlaying() {
+    if (cardEl) cardEl.classList.toggle("is-playing", playing);
+  }
+
+  function stopPlayback() {
+    if (controller && playing) { try { controller.pause(); } catch (e) {} }
+    playing = false;
+    syncPlaying();
+  }
+
+  function playerReady(api) {
+    // Wird von loadTrack aufgerufen, sobald die Spotify-API da ist
+    if (controller || creating || !api || !currentUri) return;
+    creating = true;
+    const startUri = currentUri;
+    api.createController($("embed"), { uri: startUri, width: 300, height: 80 }, (c) => {
+      controller = c;
+      creating = false;
+      loadedUri = startUri;
+      c.addListener("playback_update", (e) => {
+        const d = e.data || {};
+        playing = !d.isPaused;
+        syncPlaying();
+        // Nur eine 30-Sekunden-Vorschau? Dann ist man im Browser nicht bei Spotify eingeloggt.
+        if (playing && d.duration && d.duration <= 31000) {
+          setHint("Nur 30-Sekunden-Vorschau – im Browser bei Spotify einloggen");
+        }
+      });
+      if (currentUri && currentUri !== loadedUri) { c.loadUri(currentUri); loadedUri = currentUri; }
+    });
+  }
+
+  function loadTrack(s) {
+    const uri = trackUri(s.link);
+    currentUri = uri;
+    if (mode !== "play" || !uri) return;
+    if (controller) {
+      if (loadedUri !== uri) { controller.loadUri(uri); loadedUri = uri; }
+    } else if (window.__spotifyApi) {
+      playerReady(window.__spotifyApi);
+    }
+  }
+
+  function afterRender(s) {
+    if (mode === "play" && !trackUri(s.link)) {
+      setHint("Kein Track-Link in der CSV – QR-Code stattdessen");
+    }
+    loadTrack(s);
+  }
+
+  function togglePlay() {
+    if (!controller) {
+      setHint(window.__spotifyFailed
+        ? "Player nicht erreichbar – „In Spotify öffnen“ nutzen"
+        : "Player lädt noch …");
+      return;
+    }
+    controller.togglePlay();
+  }
+
+  window.__onSpotifyApi = () => { if (deck[pos]) loadTrack(deck[pos]); };
+  if (window.__spotifyApi && deck[pos]) loadTrack(deck[pos]);
+
+  // ---------- Zahnrad: Modus wechseln ----------
+  let toastTimer = null;
+  function showToast(text) {
+    const t = $("toast");
+    t.textContent = text;
+    t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+  }
+
+  function updateGear() {
+    const label = mode === "play" ? "Play-Button" : "QR-Code";
+    $("gear").setAttribute("aria-label", `Kartenmodus wechseln, aktuell: ${label}`);
+  }
+
+  $("gear").addEventListener("click", () => {
+    mode = mode === "play" ? "qr" : "play";
+    try { localStorage.setItem(MODE_KEY, mode); } catch (e) {}
+    updateGear();
+    showToast(mode === "play" ? "Modus: Play-Button" : "Modus: QR-Code");
+    if (!deck.length) return;
+    const wasFlipped = cardEl && cardEl.classList.contains("flipped");
+    renderCard();
+    if (wasFlipped) { cardEl.classList.add("flipped"); setHint("Tippen zum Zurückdrehen"); }
+  });
+  updateGear();
 
   // ---------- Events ----------
   $("next").addEventListener("click", () => go(1));
